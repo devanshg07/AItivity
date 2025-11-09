@@ -1,11 +1,11 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay, addMonths, subMonths, startOfWeek, endOfWeek, addWeeks, subWeeks, setHours, getHours, getMinutes } from 'date-fns';
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay, addMonths, subMonths, startOfWeek, endOfWeek, addWeeks, subWeeks, setHours, getHours, getMinutes, isToday, startOfDay, endOfDay, addDays, subDays } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronLeft, ChevronRight, Clock, Image as ImageIcon, Plus, Edit2, Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Clock, Image as ImageIcon, Plus, Edit2, Trash2, Calendar as CalendarIcon, Grid, List } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 
-type ViewMode = 'month' | 'week';
+type ViewMode = 'month' | 'week' | 'day';
 
 interface CalendarEvent {
   id: string;
@@ -68,6 +68,7 @@ export function Calendar() {
     return `${String(newHours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
   };
 
+  // Date calculations for different views
   const monthStart = startOfMonth(currentDate);
   const monthEnd = endOfMonth(currentDate);
   const calendarStart = startOfWeek(monthStart);
@@ -77,6 +78,9 @@ export function Calendar() {
   const weekStart = startOfWeek(currentDate);
   const weekEnd = endOfWeek(currentDate);
   const weekDays = eachDayOfInterval({ start: weekStart, end: weekEnd });
+
+  const dayStart = startOfDay(currentDate);
+  const dayEnd = endOfDay(currentDate);
 
   // Update current time every minute
   useEffect(() => {
@@ -92,49 +96,50 @@ export function Calendar() {
   }, []);
 
   // Fetch events from Supabase
-const fetchEvents = async () => {
-  try {
-    setIsLoading(true);
-    const { data: { session } } = await supabase.auth.getSession();
-    
-    if (!session) {
-      console.log('No user session found');
+  const fetchEvents = async () => {
+    try {
+      setIsLoading(true);
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        console.log('No user session found');
+        setIsLoading(false);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('events')
+        .select('*')
+        .order('date', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching events:', error);
+        return;
+      }
+
+      // Convert date strings back to Date objects and map column names
+      const eventsWithDates: CalendarEvent[] = (data || []).map(event => ({
+        id: event.id,
+        title: event.title,
+        startTime: event.start_time,
+        endTime: event.end_time,
+        date: new Date(event.date),
+        color: event.color,
+      }));
+
+      setEvents(eventsWithDates);
+    } catch (error) {
+      console.error('Error loading events:', error);
+    } finally {
       setIsLoading(false);
-      return;
     }
+  };
 
-    const { data, error } = await supabase
-      .from('events')
-      .select('*')
-      .order('date', { ascending: true });
-
-    if (error) {
-      console.error('Error fetching events:', error);
-      return;
-    }
-
-    // Convert date strings back to Date objects and map column names
-    const eventsWithDates: CalendarEvent[] = (data || []).map(event => ({
-      id: event.id,
-      title: event.title,
-      startTime: event.start_time,  // Map from start_time
-      endTime: event.end_time,      // Map from end_time
-      date: new Date(event.date),
-      color: event.color,
-    }));
-
-    setEvents(eventsWithDates);
-  } catch (error) {
-    console.error('Error loading events:', error);
-  } finally {
-    setIsLoading(false);
-  }
-};
-  // Auto-scroll to current time when switching to week view
+  // Auto-scroll to current time when switching to week/day view
   useEffect(() => {
-    if (viewMode === 'week') {
+    if (viewMode === 'week' || viewMode === 'day') {
       const timeoutId = setTimeout(() => {
-        const scrollContainer = document.getElementById('week-scroll-container');
+        const scrollContainer = document.getElementById(`${viewMode}-scroll-container`);
         if (scrollContainer) {
           const now = new Date();
           const hours = getHours(now);
@@ -170,6 +175,12 @@ const fetchEvents = async () => {
     return events.filter(event => isSameDay(event.date, date));
   };
 
+  const getEventsForTimeRange = (date: Date, startTime: string, endTime: string) => {
+    return getEventsForDate(date).filter(event => 
+      event.startTime >= startTime && event.startTime < endTime
+    );
+  };
+
   const timeSlots = Array.from({ length: 24 }, (_, i) => i);
 
   const getTimePosition = (time: string) => {
@@ -195,68 +206,68 @@ const fetchEvents = async () => {
   };
 
   const handleAddEvent = async () => {
-  if (newEvent.title.trim()) {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (!session) {
-        alert('Please log in to create events');
-        return;
-      }
-
-      const eventData = {
-        title: newEvent.title,
-        start_time: newEvent.startTime,  // Changed to start_time
-        end_time: newEvent.endTime,      // Changed to end_time
-        date: selectedDate.toISOString(),
-        color: newEvent.color,
-        user_id: session.user.id
-      };
-
-      if (editingEvent) {
-        // Update existing event
-        const { error } = await supabase
-          .from('events')
-          .update(eventData)
-          .eq('id', editingEvent.id);
-
-        if (error) throw error;
-
-        setEvents(events.map(e => e.id === editingEvent.id ? {
-          ...editingEvent,
-          ...newEvent,
-          date: selectedDate
-        } : e));
-      } else {
-        // Create new event
-        const { data, error } = await supabase
-          .from('events')
-          .insert([eventData])
-          .select();
-
-        if (error) throw error;
-
-        if (data) {
-          const newEventWithId: CalendarEvent = {
-            id: data[0].id,
-            ...newEvent,
-            date: selectedDate,
-          };
-          setEvents([...events, newEventWithId]);
+    if (newEvent.title.trim()) {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        
+        if (!session) {
+          alert('Please log in to create events');
+          return;
         }
-      }
 
-      // Reset form
-      const currentStartTime = getCurrentTimeString();
-      setNewEvent({ title: '', startTime: currentStartTime, endTime: addOneHour(currentStartTime), color: '#3b82f6' });
-      setEditingEvent(null);
-      setShowEventModal(false);
-    } catch (error) {
-      console.error('Error saving event:', error);
-      alert('Error saving event. Please try again.');
+        const eventData = {
+          title: newEvent.title,
+          start_time: newEvent.startTime,
+          end_time: newEvent.endTime,
+          date: selectedDate.toISOString(),
+          color: newEvent.color,
+          user_id: session.user.id
+        };
+
+        if (editingEvent) {
+          // Update existing event
+          const { error } = await supabase
+            .from('events')
+            .update(eventData)
+            .eq('id', editingEvent.id);
+
+          if (error) throw error;
+
+          setEvents(events.map(e => e.id === editingEvent.id ? {
+            ...editingEvent,
+            ...newEvent,
+            date: selectedDate
+          } : e));
+        } else {
+          // Create new event
+          const { data, error } = await supabase
+            .from('events')
+            .insert([eventData])
+            .select();
+
+          if (error) throw error;
+
+          if (data) {
+            const newEventWithId: CalendarEvent = {
+              id: data[0].id,
+              ...newEvent,
+              date: selectedDate,
+            };
+            setEvents([...events, newEventWithId]);
+          }
+        }
+
+        // Reset form
+        const currentStartTime = getCurrentTimeString();
+        setNewEvent({ title: '', startTime: currentStartTime, endTime: addOneHour(currentStartTime), color: '#3b82f6' });
+        setEditingEvent(null);
+        setShowEventModal(false);
+      } catch (error) {
+        console.error('Error saving event:', error);
+        alert('Error saving event. Please try again.');
+      }
     }
-  }
-};
+  };
 
   const handleEditEvent = (event: CalendarEvent) => {
     setEditingEvent(event);
@@ -307,7 +318,7 @@ const fetchEvents = async () => {
 
     const container = e.currentTarget as HTMLElement;
     const rect = container.getBoundingClientRect();
-    const scrollContainer = document.getElementById('week-scroll-container');
+    const scrollContainer = document.getElementById(`${viewMode}-scroll-container`);
     const scrollTop = scrollContainer?.scrollTop || 0;
     const relativeY = e.clientY - rect.top + scrollTop;
     const minutes = Math.max(0, Math.min(1440, relativeY));
@@ -332,14 +343,136 @@ const fetchEvents = async () => {
   const navigateDate = (direction: 'prev' | 'next') => {
     if (viewMode === 'month') {
       setCurrentDate(direction === 'prev' ? subMonths(currentDate, 1) : addMonths(currentDate, 1));
-    } else {
+    } else if (viewMode === 'week') {
       setCurrentDate(direction === 'prev' ? subWeeks(currentDate, 1) : addWeeks(currentDate, 1));
+    } else {
+      setCurrentDate(direction === 'prev' ? subDays(currentDate, 1) : addDays(currentDate, 1));
     }
+  };
+
+  const navigateToToday = () => {
+    setCurrentDate(new Date());
+    setSelectedDate(new Date());
   };
 
   const colorOptions = [
     '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'
   ];
+
+  const renderDayView = () => {
+    const dayEvents = getEventsForDate(currentDate);
+    const currentTimePos = getCurrentTimePosition(currentDate);
+
+    return (
+      <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden">
+        {/* Day header */}
+        <div className="flex border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 sticky top-0 z-30">
+          <div className="w-16 flex-shrink-0 border-r border-zinc-200 dark:border-zinc-800"></div>
+          <div className="flex-1 p-4">
+            <div className="text-center">
+              <div className="text-xs text-zinc-500 dark:text-zinc-400 mb-1 font-medium">
+                {format(currentDate, 'EEEE')}
+              </div>
+              <div className={`text-2xl font-bold w-12 h-12 mx-auto rounded-full flex items-center justify-center ${
+                isToday(currentDate)
+                  ? 'bg-blue-600 text-white'
+                  : 'text-zinc-900 dark:text-white'
+              }`}>
+                {format(currentDate, 'd')}
+              </div>
+              <div className="text-sm text-zinc-600 dark:text-zinc-400 mt-1">
+                {format(currentDate, 'MMMM yyyy')}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Scrollable content */}
+        <div className="flex h-[600px] overflow-y-auto" id="day-scroll-container">
+          {/* Time column */}
+          <div className="w-16 flex-shrink-0 border-r border-zinc-200 dark:border-zinc-800 sticky left-0 bg-white dark:bg-zinc-900 z-20">
+            <div className="relative h-[1440px]">
+              {timeSlots.map(hour => (
+                <div
+                  key={hour}
+                  className="h-16 border-b border-zinc-200 dark:border-zinc-800 text-xs text-zinc-500 dark:text-zinc-400 pr-2 text-right pt-1"
+                >
+                  {format(setHours(new Date(), hour), 'h a')}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Day column */}
+          <div className="flex-1 relative">
+            <div 
+              className="time-slot-container relative h-[1440px] select-none cursor-pointer"
+              onClick={(e) => handleTimeSlotClick(e, currentDate)}
+            >
+              {/* Hour lines */}
+              {timeSlots.map(hour => (
+                <div
+                  key={hour}
+                  className="h-16 border-b border-zinc-100 dark:border-zinc-800/50 relative hover:bg-zinc-50 dark:hover:bg-zinc-800/30 transition-colors"
+                >
+                  {/* Half hour marker */}
+                  <div className="absolute top-8 left-0 right-0 h-px border-t border-zinc-100 dark:border-zinc-800/30"></div>
+                  {/* Quarter hour markers */}
+                  <div className="absolute top-4 left-0 right-0 h-px border-t border-zinc-50 dark:border-zinc-800/20"></div>
+                  <div className="absolute top-12 left-0 right-0 h-px border-t border-zinc-50 dark:border-zinc-800/20"></div>
+                </div>
+              ))}
+
+              {/* Current time indicator */}
+              {currentTimePos !== null && isToday(currentDate) && (
+                <div
+                  className="absolute left-0 right-0 z-30 pointer-events-none"
+                  style={{ top: `${currentTimePos}px` }}
+                >
+                  <div className="flex items-center">
+                    <div className="w-2 h-2 rounded-full bg-red-500 -ml-1"></div>
+                    <div className="flex-1 h-0.5 bg-red-500"></div>
+                  </div>
+                </div>
+              )}
+
+              {/* Events */}
+              {dayEvents.map(event => {
+                const top = getEventTop(event.startTime);
+                const height = getEventHeight(event.startTime, event.endTime);
+
+                return (
+                  <motion.div
+                    key={event.id}
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    whileHover={{ scale: 1.02, zIndex: 20 }}
+                    className="event-block absolute left-4 right-4 rounded-md px-3 py-2 text-sm cursor-pointer shadow-md hover:shadow-lg transition-all z-10 overflow-hidden"
+                    style={{
+                      top: `${top}px`,
+                      height: `${Math.max(height, 40)}px`,
+                      backgroundColor: event.color,
+                      color: 'white',
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleEditEvent(event);
+                    }}
+                    onContextMenu={(e) => handleContextMenu(e, event)}
+                  >
+                    <div className="font-semibold truncate text-white">{event.title}</div>
+                    <div className="text-xs opacity-90 text-white/90 mt-1">
+                      {event.startTime} - {event.endTime}
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   if (isLoading) {
     return (
@@ -367,7 +500,9 @@ const fetchEvents = async () => {
           <h2 className="text-2xl font-bold text-zinc-900 dark:text-white">
             {viewMode === 'month' 
               ? format(currentDate, 'MMMM yyyy')
-              : `${format(weekStart, 'MMM d')} - ${format(weekEnd, 'MMM d, yyyy')}`
+              : viewMode === 'week'
+              ? `${format(weekStart, 'MMM d')} - ${format(weekEnd, 'MMM d, yyyy')}`
+              : format(currentDate, 'EEEE, MMMM d, yyyy')
             }
           </h2>
           <motion.button
@@ -381,7 +516,7 @@ const fetchEvents = async () => {
           <motion.button
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
-            onClick={() => setCurrentDate(new Date())}
+            onClick={navigateToToday}
             className="px-3 py-1 text-sm rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-300 dark:border-zinc-700"
           >
             Today
@@ -393,25 +528,40 @@ const fetchEvents = async () => {
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
               onClick={() => setViewMode('month')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${
                 viewMode === 'month'
                   ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-white shadow-sm'
                   : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
               }`}
             >
+              <Grid className="w-4 h-4" />
               Month
             </motion.button>
             <motion.button
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
               onClick={() => setViewMode('week')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${
                 viewMode === 'week'
                   ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-white shadow-sm'
                   : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
               }`}
             >
+              <CalendarIcon className="w-4 h-4" />
               Week
+            </motion.button>
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setViewMode('day')}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${
+                viewMode === 'day'
+                  ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-white shadow-sm'
+                  : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
+              }`}
+            >
+              <List className="w-4 h-4" />
+              Day
             </motion.button>
           </div>
           <motion.button
@@ -440,6 +590,7 @@ const fetchEvents = async () => {
             {days.map((day, idx) => {
               const isCurrentMonth = isSameMonth(day, currentDate);
               const isSelected = isSameDay(day, selectedDate);
+              const isCurrentDay = isToday(day);
               const dayEvents = getEventsForDate(day);
 
               return (
@@ -452,13 +603,20 @@ const fetchEvents = async () => {
                   whileTap={{ scale: 0.95 }}
                   onClick={() => setSelectedDate(day)}
                   className={`
-                    relative p-2 rounded-lg min-h-[80px] text-left
+                    relative p-2 rounded-lg min-h-[80px] text-left border-2 transition-colors
                     ${isCurrentMonth ? 'text-zinc-900 dark:text-white' : 'text-zinc-400 dark:text-zinc-600'}
-                    ${isSelected ? 'bg-blue-100 dark:bg-blue-900/30 ring-2 ring-blue-500' : 'hover:bg-zinc-100 dark:hover:bg-zinc-800'}
-                    transition-colors
+                    ${isSelected ? 'bg-blue-100 dark:bg-blue-900/30 border-blue-500' : 'border-transparent hover:bg-zinc-100 dark:hover:bg-zinc-800'}
+                    ${isCurrentDay && !isSelected ? 'border-blue-300 dark:border-blue-700' : ''}
                   `}
                 >
-                  <div className="text-sm font-medium mb-1">{format(day, 'd')}</div>
+                  <div className={`text-sm font-medium mb-1 flex items-center justify-between ${
+                    isCurrentDay ? 'text-blue-600 dark:text-blue-400' : ''
+                  }`}>
+                    <span>{format(day, 'd')}</span>
+                    {isCurrentDay && (
+                      <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                    )}
+                  </div>
                   <div className="space-y-1">
                     {dayEvents.slice(0, 2).map(event => (
                       <div
@@ -482,7 +640,7 @@ const fetchEvents = async () => {
             })}
           </div>
         </>
-      ) : (
+      ) : viewMode === 'week' ? (
         <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden">
           {/* Day headers - sticky */}
           <div className="flex border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 sticky top-0 z-30">
@@ -490,12 +648,14 @@ const fetchEvents = async () => {
             <div className="flex-1 grid grid-cols-7">
               {weekDays.map((day) => {
                 const isToday = isSameDay(day, new Date());
+                const isSelected = isSameDay(day, selectedDate);
                 return (
                   <div
                     key={day.toString()}
                     className={`h-16 border-r border-zinc-200 dark:border-zinc-800 last:border-r-0 p-2 text-center ${
                       isToday ? 'bg-blue-50 dark:bg-blue-900/20' : ''
-                    }`}
+                    } ${isSelected ? 'ring-2 ring-blue-500' : ''}`}
+                    onClick={() => setSelectedDate(day)}
                   >
                     <div className="text-xs text-zinc-500 dark:text-zinc-400 mb-1 font-medium">
                       {format(day, 'EEE')}
@@ -615,6 +775,8 @@ const fetchEvents = async () => {
             </div>
           </div>
         </div>
+      ) : (
+        renderDayView()
       )}
 
       {/* Right-click Context Menu */}

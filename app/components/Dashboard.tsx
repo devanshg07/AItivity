@@ -38,7 +38,7 @@ export function Dashboard() {
               <Sparkles className="w-6 h-6 text-white" />
             </motion.div>
             <div>
-              <h1 className="text-3xl font-bold text-zinc-900 dark:text-white">Productivity AI</h1>
+              <h1 className="text-3xl font-bold text-zinc-900 dark:text-white">AItivity</h1>
               <p className="text-zinc-600 dark:text-zinc-400">Your intelligent life organizer</p>
             </div>
           </div>
